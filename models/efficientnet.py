@@ -39,22 +39,22 @@ class Block(nn.Module):
 
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
-        print(out.size())
+        # print(out.size())
         out = F.relu(self.bn2(self.conv2(out)))
-        print(out.size())
+        # print(out.size())
         out = self.bn3(self.conv3(out))
-        print(out.size())
+        # print(out.size())
         shortcut = self.shortcut(x) if self.stride == 1 else out
         # Squeeze-Excitation
         w = F.avg_pool2d(out, out.size(2))  # out is the input, out.size(2):16 is the kernel size, stride size is default to kernel size
-        print(w.size())
+        # print(w.size())
         w = F.relu(self.fc1(w))
-        print(w.size())
+        # print(w.size())
         w = self.fc2(w).sigmoid()
-        print(w.size())
+        # print(w.size())
         out = out * w + shortcut
-        print(shortcut.size())
-        print(out.size())
+        # print(shortcut.size())
+        # print(out.size())
         return out
 
 
