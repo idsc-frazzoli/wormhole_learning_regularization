@@ -10,77 +10,34 @@ import argparse
 import numpy as np
 import pandas as pd
 from models import *
-from utils import process_prediction
-
-parser = argparse.ArgumentParser(description='Extract confident predictions for color-shifted images')
-parser.add_argument('--conf', default=5, type=int, help='confident percentage')
-parser.add_argument('--cuda', default=5, type=int, help='specify GPU number')
-args = parser.parse_args()
-
-confident_num = args.conf
-
-if torch.cuda.is_available():
-    device = 'cuda'
-    # device = 'cuda:%s' % args.cuda
-else:
-    device = 'cpu'
-
-start_epoch = 0
+from utils import PredictionAccPerClass
 
 
-# def hue_transform(image, hue):
-class HueTransform:
-    def __init__(self, hue):
-        self.hue = hue
-
-    def __call__(self, x):
-        return transforms.functional.adjust_hue(x, self.hue)
-
-# Data
-print('==> Preparing data..')
-transform_train = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-])
-
-transform_hueshift = transforms.Compose([
-    HueTransform(hue=0.5),
-    transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-])
+# classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 
-
-trainset_shifted = torchvision.datasets.CIFAR10(root='../data_cifar', train=True, download=True, transform=transform_hueshift)
-trainloader_shifted = torch.utils.data.DataLoader(trainset_shifted, batch_size=100, shuffle=True, num_workers=2)
-
-# testset = torchvision.datasets.CIFAR10(root='../data_cifar', train=False, download=True, transform=transform_hueshift)
-# testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
-
-classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-
-# Model
-print('==> Building model..')
-net = ProjectionNet()
-net = net.to(device)
-print(torch.cuda.current_device())
+def process_prediction(res, i):  # get indexes of confident samples
+    sum_class = np.sum(np.absolute(res), axis=1)
+    pred_prob = np.max(res, axis=1)
+    ratio = np.divide(pred_prob, sum_class)
+    ratio_pd = pd.DataFrame(data=ratio, columns=['max_pred_ratio'])
+    sorted_pd = ratio_pd.sort_values('max_pred_ratio', ascending=False)
+    return list(sorted_pd[0:i].index)
 
 
-# resume the model with best prediction on shifted test dataset
-print('==> Resuming from checkpoint..')
-assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-checkpoint = torch.load('./checkpoint/chpt_reg20.pth', map_location=device)
-net.load_state_dict(checkpoint['net'])
-best_acc = checkpoint['acc']
-# start_epoch = checkpoint['epoch']
-
-
-def predict_pick(conf):
+def predict_pick(model, conf, dataloader):
+    net = model
     net.eval()
     confident_samples = []
     predict_case = []
+    acc_per_class = PredictionAccPerClass()
+    if torch.cuda.is_available():
+        # device = 'cuda'
+        device = 'cuda:5'
+    else:
+        device = 'cpu'
     with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(trainloader_shifted):
+        for batch_idx, (inputs, targets) in enumerate(dataloader):
             inputs = inputs.to(device)
             outputs = net(inputs)
 
@@ -91,12 +48,21 @@ def predict_pick(conf):
             predicted_truth = predicted.eq(targets.to(device)).cpu().data.numpy()
             predict_case.append(predicted_truth[confident_index])
 
+            prediction_sampled_device = predicted[confident_index]
+            targets_sampled_device = targets[confident_index]
+
             inputs_sampled = inputs.cpu()[confident_index].data.numpy()
-            prediction_sampled = predicted.cpu()[confident_index].data.numpy()
+            prediction_sampled = prediction_sampled_device.cpu().data.numpy()
+
+            acc_per_class.update(prediction_sampled_device, targets_sampled_device)
 
             for id in range(conf):
                 confident_samples.append((inputs_sampled[id], prediction_sampled[id]))
-    np.save("reg_20_%sconf_acc" % conf, np.array(predict_case))
+    # np.save("reg_20_%sconf_acc" % conf, np.array(predict_case))
+    predict_result = np.array(predict_case).astype(int).astype(float)
+    print("overall accuracy of confident samples: %8.3f" % np.average(predict_result))
+    acc_per_class.output_class_prediction()
+
     return confident_samples
 
 
@@ -108,9 +74,38 @@ def transpose_image(x):
     return z.astype(np.float32)
 
 
-confident_samples = predict_pick(confident_num)
-root = './confident_transformed_sample/'
-name = 'hue_transform'
-for i in range(len(confident_samples)):
-    np.save(root + '%s.%d_%d' % (name, i, confident_samples[i][1]), transpose_image(confident_samples[i][0]))
+def save_confident_shifted_samples(model, round, dataset, ratio=0.05):
+    batch_size = 100
+    trainloader_shifted = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=2)
+    confident_samples = predict_pick(model=model, conf=int(np.rint(ratio*batch_size)), dataloader=trainloader_shifted)
+
+    root = './confident_transformed_sample_round%s/' % round
+    if os.path.exists(root):
+        import glob
+        files = glob.glob(root + '*')
+        for f in files:
+            os.remove(f)
+        print("Previous saved samples removed.")
+    else:
+        os.mkdir(root)
+        print("New directory for samples made.")
+
+    name = 'hue_transform'
+    for sample in range(len(confident_samples)):
+        np.save(root + '%s.%d_%d' % (name, sample, confident_samples[sample][1]),
+                transpose_image(confident_samples[sample][0]))
+
+    path_train = []
+    files = os.listdir(root)
+    for file in files:
+        file_dir = os.path.join(root, file)
+        path_train.append(file_dir)
+    # random.shuffle(path_train)
+    with open('./path_shifted_train%s.txt' % round, 'w') as f:
+        for j in range(len(path_train)):
+            path = path_train[j]
+            if j != len(path_train) - 1:
+                path = path + ' '
+            f.write(path)
+
 
