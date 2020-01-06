@@ -25,7 +25,7 @@ def process_prediction(res, i):  # get indexes of confident samples
     return list(sorted_pd[0:i].index)
 
 
-def predict_pick(model, conf, dataloader):
+def predict_pick(model, conf, dataloader, cuda=5):
     net = model
     net.eval()
     confident_samples = []
@@ -33,9 +33,10 @@ def predict_pick(model, conf, dataloader):
     acc_per_class = PredictionAccPerClass()
     if torch.cuda.is_available():
         # device = 'cuda'
-        device = 'cuda:5'
+        device = 'cuda:%s' % cuda
     else:
         device = 'cpu'
+    net = net.to(device)
     with torch.no_grad():
         for batch_idx, (inputs, targets) in enumerate(dataloader):
             inputs = inputs.to(device)
@@ -58,7 +59,6 @@ def predict_pick(model, conf, dataloader):
 
             for id in range(conf):
                 confident_samples.append((inputs_sampled[id], prediction_sampled[id]))
-    # np.save("reg_20_%sconf_acc" % conf, np.array(predict_case))
     predict_result = np.array(predict_case).astype(int).astype(float)
     print("overall accuracy of confident samples: %8.3f" % np.average(predict_result))
     acc_per_class.output_class_prediction()
@@ -74,25 +74,25 @@ def transpose_image(x):
     return z.astype(np.float32)
 
 
-def save_confident_shifted_samples(model, round, dataset, ratio=0.05):
+def save_confident_shifted_samples(model, round, dataset, dir_name, ratio=0.05):
     batch_size = 100
     trainloader_shifted = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=2)
     confident_samples = predict_pick(model=model, conf=int(np.rint(ratio*batch_size)), dataloader=trainloader_shifted)
 
-    root = './confident_transformed_sample_round%s/' % round
+    root = './%s/confident_sample%s' % (dir_name, round)
     if os.path.exists(root):
         import glob
-        files = glob.glob(root + '*')
+        files = glob.glob(root + '/*')
         for f in files:
             os.remove(f)
         print("Previous saved samples removed.")
     else:
-        os.mkdir(root)
+        os.makedirs(root)
         print("New directory for samples made.")
 
     name = 'hue_transform'
     for sample in range(len(confident_samples)):
-        np.save(root + '%s.%d_%d' % (name, sample, confident_samples[sample][1]),
+        np.save(root + '/%s.%d_%d' % (name, sample, confident_samples[sample][1]),
                 transpose_image(confident_samples[sample][0]))
 
     path_train = []
@@ -101,7 +101,7 @@ def save_confident_shifted_samples(model, round, dataset, ratio=0.05):
         file_dir = os.path.join(root, file)
         path_train.append(file_dir)
     # random.shuffle(path_train)
-    with open('./path_shifted_train%s.txt' % round, 'w') as f:
+    with open('./%s/path_shifted_train%s.txt' % (dir_name, round), 'w') as f:
         for j in range(len(path_train)):
             path = path_train[j]
             if j != len(path_train) - 1:

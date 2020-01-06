@@ -11,7 +11,8 @@ import argparse
 import numpy as np
 import pandas as pd
 from models import *
-from utils import process_prediction
+from pick_conf import process_prediction
+from utils import PredictionAccPerClass, get_lr
 
 
 # TODO: select good model, maybe not too complicated
@@ -38,7 +39,8 @@ else:
     device = 'cpu'
 # device = 'cpu'
 
-best_acc = 0  # best test accuracy
+best_acc_original = 0  # best test accuracy
+best_acc_shifted = 0
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 projection_loss_weight = args.projection_weight
 
@@ -70,15 +72,18 @@ trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True
 trainset_shifted = torchvision.datasets.CIFAR10(root='../data_cifar', train=True, download=True, transform=transform_hueshift)
 trainloader_shifted = torch.utils.data.DataLoader(trainset_shifted, batch_size=128, shuffle=True, num_workers=2)
 
-testset = torchvision.datasets.CIFAR10(root='../data_cifar', train=False, download=True, transform=transform_hueshift)
-testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
+testset_shifted = torchvision.datasets.CIFAR10(root='../data_cifar', train=False, download=True, transform=transform_hueshift)
+testloader_shifted = torch.utils.data.DataLoader(testset_shifted, batch_size=100, shuffle=False, num_workers=2)
+
+testset_original = torchvision.datasets.CIFAR10(root='../data_cifar', train=False, download=True, transform=transform_train)
+testloader_original = torch.utils.data.DataLoader(testset_original, batch_size=100, shuffle=False, num_workers=2)
 
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 # Model
 print('==> Building model..')
-# net = ProjectionNet()
-net = EfficientNetB0()
+net = ProjectionNet()
+# net = EfficientNetB0()
 net = net.to(device)
 print(torch.cuda.current_device())
 
@@ -91,9 +96,11 @@ if args.resume:
     # Load checkpoint.
     print('==> Resuming from checkpoint..')
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-    checkpoint = torch.load('./checkpoint/ckpt_reg_effinet%8.2f.pth' % projection_loss_weight)
+    checkpoint = torch.load('./checkpoint/ckpt_reg%8.2f.pth' % projection_loss_weight)
     net.load_state_dict(checkpoint['net'])
-    best_acc = checkpoint['acc']
+    # best_acc = checkpoint['acc']
+    best_acc_original = checkpoint['origin_acc']
+    best_acc_shifted = checkpoint['shifted_acc']
     start_epoch = checkpoint['epoch']
 
 criterion = nn.CrossEntropyLoss()
@@ -108,7 +115,7 @@ def projection_criterion(train_res, test_res, round):
     diff_mean = torch.dist(mean_train, mean_test)
     diff_std = torch.dist(std_train, std_test, p=1)
 
-    if round % 30 == 0:
+    if round % 60 == 0:
         print("projection criterion loss")
         print(diff_mean.cpu().data.numpy())
         print(diff_std.cpu().data.numpy())
@@ -124,6 +131,7 @@ def train(epoch):
     train_loss = 0
     correct = 0
     total = 0
+    acc_per_class = PredictionAccPerClass()
     # for batch_idx, (inputs, targets) in enumerate(trainloader):  # enumerate: (index, data)
     for batch_idx, (train_data, test_data) in enumerate(zip(trainloader, trainloader_shifted)):  # enumerate: (index, data)
         train_input = train_data[0]
@@ -145,22 +153,24 @@ def train(epoch):
 
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
+        acc_per_class.update(predicted, targets)
 
-        # progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-        #     % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
-        if batch_idx % 30 == 0:
+        if batch_idx % 60 == 0:
             print("batch idx %s, loss %.3f , acc %.3f%% (%d/%d)"
                   % (batch_idx, train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+    acc_per_class.output_class_prediction()
 
 
-def test(epoch):
-    global best_acc
+def test(epoch, shift=False):
+    global best_acc_original, best_acc_shifted
+    best_acc = best_acc_shifted if shift else best_acc_original
     net.eval()
     test_loss = 0
     correct = 0
     total = 0
-    confident_num = 5
-    confident_res = np.zeros((100, confident_num))
+
+    testloader = testloader_shifted if shift else testloader_original
+    acc_per_class = PredictionAccPerClass()
     with torch.no_grad():
         for batch_idx, (inputs, targets) in enumerate(testloader):
             inputs, targets = inputs.to(device), targets.to(device)
@@ -172,35 +182,31 @@ def test(epoch):
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
 
-            outputs_np = outputs.cpu().data.numpy()
-            confident_index = process_prediction(outputs_np, confident_num)
+            acc_per_class.update(predicted, targets)
+        print("shift %s test set: batch idx %s, loss %.3f , acc %.3f%% (%d/%d)"
+              % (shift, batch_idx, test_loss/(batch_idx + 1), 100.*correct/total, correct, total))
+        acc_per_class.output_class_prediction()
 
-            predicted_truth = predicted.eq(targets).cpu().data.numpy()
-            confident_res[batch_idx] = predicted_truth[confident_index]
-            # print("result of confident prediction: " + str(predicted_truth[confident_index]))
-
-            # progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-            #     % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
-        np.save("./confident_accuracy_result/with_reg%8.2f_confident_result%s" % (projection_loss_weight, epoch), confident_res)
-        # TODO: get confident samples and return
-        print("test set: batch idx %s, loss %.3f , acc %.3f%% (%d/%d)"
-              % (batch_idx, test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-
-    # Save checkpoint.
     acc = 100.*correct/total
     if acc > best_acc:
         print('Saving..')
         state = {
             'net': net.state_dict(),
-            'acc': acc,
+            'origin_acc': acc if not shift else best_acc_original,
+            'shifted_acc': acc if shift else best_acc_shifted,
             'epoch': epoch,
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, './checkpoint/ckpt_reg_effinet%8.2f.pth' % projection_loss_weight)
-        best_acc = acc
+        torch.save(state, './checkpoint/ckpt_reg%8.3f.pth' % projection_loss_weight)
+        if shift:
+            best_acc_shifted = acc
+        else:
+            best_acc_original = acc
 
 
 for epoch in range(start_epoch, start_epoch+200):
+    optimizer = optim.SGD(net.parameters(), lr=get_lr(epoch, args.lr), momentum=0.5, weight_decay=5e-4)
     train(epoch)
-    test(epoch)
+    test(epoch, shift=False)
+    test(epoch, shift=True)

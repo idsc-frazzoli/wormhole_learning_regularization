@@ -151,8 +151,9 @@ class PredictionAccPerClass:
 
     def output_class_prediction(self):
         for i in range(10):
-            print('Accuracy of %5s : %2d %%' % (
-                self.classes[i], 100 * self.class_correct[i] / self.class_total[i]))
+            print('Accuracy of %5s : %2d %%, %4d / %5d' % (
+                self.classes[i], 100 * self.class_correct[i] / self.class_total[i],
+                self.class_correct[i], self.class_total[i]))
 
 
 def projection_criterion(train_res, test_res, round):
@@ -162,12 +163,26 @@ def projection_criterion(train_res, test_res, round):
     diff_mean = torch.dist(mean_train, mean_test)
     diff_std = torch.dist(std_train, std_test, p=1)
 
-    if round % 30 == 0:
-        print("projection criterion loss")
-        print(diff_mean.cpu().data.numpy())
-        print(diff_std.cpu().data.numpy())
-
+    if round % 60 == 0:
+        print("projection criterion loss %8.5f, %8.5f" %
+              (diff_mean.cpu().data.numpy(), diff_std.cpu().data.numpy()))
+    assert (not np.isnan(diff_mean.cpu().data.numpy()))
+    assert (not np.isnan(diff_std.cpu().data.numpy()))
     return 10*diff_mean + diff_std
+
+
+def get_lr(epoch, rate):
+    if epoch < 5:
+        lr = rate
+    elif 5 <= epoch < 20:
+        lr = rate * 0.6
+    elif 20 <= epoch < 40:
+        lr = rate/4
+    elif 40 <= epoch < 100:
+        lr = rate/16
+    else:
+        lr = rate/64
+    return lr
 
 
 # def hue_transform(image, hue):
@@ -188,7 +203,7 @@ def get_hue_transform(hue=0.5):
     return transform_hueshift
 
 
-def get_concat_dataset(round):
+def get_concat_dataset(round, dir_name):
     transform_origin = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
@@ -209,7 +224,8 @@ def get_concat_dataset(round):
         concat_set = [trainset]
         for i in range(round):
             # get the i-th confident sample sets
-            trainset_concat = Signal('path_shifted_train%s.txt' % i, transform=transform_concat, train=True, test=False)
+            trainset_concat = Signal('./%s/path_shifted_train%s.txt' % (dir_name, i),
+                                     transform=transform_concat, train=True, test=False)
             concat_set.append(trainset_concat)
         return torch.utils.data.ConcatDataset(concat_set)
 
@@ -230,9 +246,3 @@ def get_dataset(train=True, hue=0.5):
 
     return torchvision.datasets.CIFAR10(root='../data_cifar', train=train, download=True,
                                                   transform=transform)
-
-
-
-
-
-
