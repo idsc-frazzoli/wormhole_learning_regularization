@@ -16,7 +16,8 @@ import torchvision
 import torchvision.transforms as transforms
 import torch
 from sample_new_images import Signal
-
+from torch._utils import _accumulate
+from torch.utils.data import Dataset, Subset
 
 def get_mean_and_std(dataset):
     '''Compute the mean and std value of dataset.'''
@@ -175,13 +176,13 @@ def get_lr(epoch, rate):
     if epoch < 5:
         lr = rate
     elif 5 <= epoch < 20:
-        lr = rate * 0.6
+        lr = rate/5
     elif 20 <= epoch < 40:
-        lr = rate/4
+        lr = rate/25
     elif 40 <= epoch < 100:
-        lr = rate/16
+        lr = rate/125
     else:
-        lr = rate/64
+        lr = rate/625
     return lr
 
 
@@ -195,39 +196,34 @@ class HueTransform:
 
 
 def get_hue_transform(hue=0.5):
-    transform_hueshift = transforms.Compose([
-        HueTransform(hue=hue),
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    ])
+    if hue != 0:
+        transform_hueshift = transforms.Compose([
+            HueTransform(hue=hue),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
+    else:
+        transform_hueshift = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
     return transform_hueshift
 
 
 def get_concat_dataset(round, dir_name):
-    transform_origin = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    ])
-
     transform_concat = transforms.Compose([
         transforms.ToTensor(),
     ])
 
-    trainset = torchvision.datasets.CIFAR10(root='../data_cifar', train=True, download=True,
-                                            transform=transform_origin)
-
-    if round == 0:
-        print("returning the original training dataset")
-        return trainset
-    else:
-        print("get %s concatenated dataset" % round)
-        concat_set = [trainset]
-        for i in range(round):
-            # get the i-th confident sample sets
-            trainset_concat = Signal('./%s/path_shifted_train%s.txt' % (dir_name, i),
-                                     transform=transform_concat, train=True, test=False)
-            concat_set.append(trainset_concat)
-        return torch.utils.data.ConcatDataset(concat_set)
+    assert(round > 0), "No augmentation needed in the initial round"
+    print("get %s concatenated dataset" % round)
+    concat_set = []
+    for i in range(round):
+        # get the i-th confident sample sets
+        trainset_concat = Signal('./%s/path_shifted_train%s.txt' % (dir_name, i),
+                                 transform=transform_concat)
+        concat_set.append(trainset_concat)
+    return concat_set
 
 
 def get_dataset(train=True, hue=0.5):
@@ -246,3 +242,12 @@ def get_dataset(train=True, hue=0.5):
 
     return torchvision.datasets.CIFAR10(root='../data_cifar', train=train, download=True,
                                                   transform=transform)
+
+
+def random_split_dataset(dataset, lengths, seed=0):
+    if sum(lengths) != len(dataset):
+        raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
+    r = np.random.RandomState(1234)
+    r.seed(seed)
+    indices = r.permutation(sum(lengths)).tolist()
+    return [Subset(dataset, indices[offset - length:offset]) for offset, length in zip(_accumulate(lengths), lengths)]
