@@ -254,12 +254,12 @@ for aug in range(round, len(net_list)):
         optimizer = optim.SGD(net.parameters(), lr=get_lr(epoch, args.lr), momentum=0.5, weight_decay=5e-4)
         if reg_list[aug]:
             train(epoch, zip(trainloader, trainloader_shifted), reg=True)
-            # no_improve = test(epoch, aug, validation_set, validation_set_shifted, test=False)
-            no_improve = test(epoch, aug, validation_set_shifted, test=False)
+            no_improve = test(epoch, aug, validation_set, validation_set_shifted, test=False)
+            # no_improve = test(epoch, aug, validation_set_shifted, test=False)
         else:
             train(epoch, trainloader, reg=False)
-            no_improve = test(epoch, aug, validation_set_shifted, test=False)
-            # test(epoch, aug, validation_set_shifted, test=True)
+            # no_improve = test(epoch, aug, validation_set_shifted, test=False)
+            no_improve = test(epoch, aug, validation_set, test=False)  # test False means model might be saved
         if no_improve:
             stop_count += 1
         else:
@@ -274,21 +274,21 @@ for aug in range(round, len(net_list)):
     start_epoch = 0
     best_validation_loss = 1e6
 
-print("Final training on all training data:")
-if len(net_list) > 1:
-    training_set = torch.utils.data.ConcatDataset([overall_trainset] + get_concat_dataset(len(net_list), root_name))
-    trainloader = torch.utils.data.DataLoader(training_set, batch_size=128, shuffle=True, num_workers=2)
-    for epoch in range(15):
-        optimizer = optim.SGD(net.parameters(), lr=get_lr(epoch+30, args.lr), momentum=0.5, weight_decay=5e-4)
-        train(epoch, trainloader, reg=False)
-elif reg_list[-1]:
-    trainloader = torch.utils.data.DataLoader(overall_trainset, batch_size=128, shuffle=True, num_workers=2)
-    trainloader_shifted = torch.utils.data.DataLoader(shifted_trainset, batch_size=128, shuffle=True, num_workers=2)
-    for epoch in range(15):
-        optimizer = optim.SGD(net.parameters(), lr=get_lr(epoch+30, args.lr), momentum=0.5, weight_decay=5e-4)
-        train(epoch, zip(trainloader, trainloader_shifted), reg=True)
-else:
-    trainloader = torch.utils.data.DataLoader(overall_trainset, batch_size=128, shuffle=True, num_workers=2)
+# print("Final training on all training data:")
+# if len(net_list) > 1:
+#     training_set = torch.utils.data.ConcatDataset([overall_trainset] + get_concat_dataset(len(net_list), root_name))
+#     trainloader = torch.utils.data.DataLoader(training_set, batch_size=128, shuffle=True, num_workers=2)
+#     for epoch in range(15):
+#         optimizer = optim.SGD(net.parameters(), lr=get_lr(epoch+30, args.lr), momentum=0.5, weight_decay=5e-4)
+#         train(epoch, trainloader, reg=False)
+# elif reg_list[-1]:
+#     trainloader = torch.utils.data.DataLoader(overall_trainset, batch_size=128, shuffle=True, num_workers=2)
+#     trainloader_shifted = torch.utils.data.DataLoader(shifted_trainset, batch_size=128, shuffle=True, num_workers=2)
+#     for epoch in range(15):
+#         optimizer = optim.SGD(net.parameters(), lr=get_lr(epoch+30, args.lr), momentum=0.5, weight_decay=5e-4)
+#         train(epoch, zip(trainloader, trainloader_shifted), reg=True)
+# else:
+#     trainloader = torch.utils.data.DataLoader(overall_trainset, batch_size=128, shuffle=True, num_workers=2)
 
 print("Testing on complete test set:")
 
