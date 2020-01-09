@@ -173,16 +173,12 @@ def projection_criterion(train_res, test_res, round):
 
 
 def get_lr(epoch, rate):
-    if epoch < 5:
+    if epoch < 40:
         lr = rate
-    elif 5 <= epoch < 20:
-        lr = rate/5
-    elif 20 <= epoch < 40:
-        lr = rate/25
     elif 40 <= epoch < 100:
-        lr = rate/125
+        lr = rate/5
     else:
-        lr = rate/625
+        lr = rate/20
     return lr
 
 
@@ -220,7 +216,7 @@ def get_concat_dataset(round, dir_name):
     concat_set = []
     for i in range(round):
         # get the i-th confident sample sets
-        trainset_concat = Signal('./%s/path_shifted_train%s.txt' % (dir_name, i),
+        trainset_concat = Signal('./confident_samples/%s/path_shifted_train%s.txt' % (dir_name, i),
                                  transform=transform_concat)
         concat_set.append(trainset_concat)
     return concat_set

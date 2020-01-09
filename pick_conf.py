@@ -79,7 +79,7 @@ def save_confident_shifted_samples(model, round, dataset, dir_name, ratio=0.05):
     trainloader_shifted = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=2)
     confident_samples = predict_pick(model=model, conf=int(np.rint(ratio*batch_size)), dataloader=trainloader_shifted)
 
-    root = './%s/confident_sample%s' % (dir_name, round)
+    root = './confident_samples/%s/confident_sample%s' % (dir_name, round)
     if os.path.exists(root):
         import glob
         files = glob.glob(root + '/*')
@@ -101,7 +101,7 @@ def save_confident_shifted_samples(model, round, dataset, dir_name, ratio=0.05):
         file_dir = os.path.join(root, file)
         path_train.append(file_dir)
     # random.shuffle(path_train)
-    with open('./%s/path_shifted_train%s.txt' % (dir_name, round), 'w') as f:
+    with open('./confident_samples/%s/path_shifted_train%s.txt' % (dir_name, round), 'w') as f:
         for j in range(len(path_train)):
             path = path_train[j]
             if j != len(path_train) - 1:

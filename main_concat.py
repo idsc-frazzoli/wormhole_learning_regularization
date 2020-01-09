@@ -15,7 +15,7 @@ from pick_conf import save_confident_shifted_samples
 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
-parser.add_argument('--lr', default=0.05, type=float, help='learning rate')
+parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
 parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
 parser.add_argument('--cuda', default=5, type=int, help='specify GPU number')
 parser.add_argument('--hue_shift', default=0.5, type=float, help='in the range of [-0.5, 0.5]')
@@ -27,9 +27,9 @@ parser.add_argument('--regularizationNum', default=1, type=int, help='number of 
 parser.add_argument('--epoch', default=80, type=int, help='number of training epochs')
 args = parser.parse_args()
 
-root_name = '%ssimple_%scomplex_%sreg_%sweight_%sepoch' % (args.projectionNetNum, args.complexNetNum,
-                                                           args.regularizationNum, args.projection_weight,
-                                                           args.epoch)
+root_name = '%ssimple_%scomplex_%sreg_%sweight_%sepoch_%srate' % (args.projectionNetNum, args.complexNetNum,
+                                                               args.regularizationNum, args.projection_weight,
+                                                               args.epoch, args.lr)
 
 if torch.cuda.is_available():
     # device = 'cuda'
@@ -74,9 +74,9 @@ if args.resume:
     net = net_list[round]
     net.load_state_dict(checkpoint['net'])
     net_list[round] = net
-    best_acc_origin = checkpoint['acc_origin']
-    best_acc_shifted = checkpoint['acc_test']
+    best_validation_loss = checkpoint['validation_loss']
     start_epoch = checkpoint['epoch']
+    best_model_state = checkpoint['net']
 
 criterion = nn.CrossEntropyLoss()
 
@@ -218,6 +218,7 @@ for aug in range(round, len(net_list)):
     print("In round %s" % aug)
 
     overall_trainset = get_dataset(train=True, hue=0)
+    another = overall_trainset
     shifted_trainset = get_dataset(train=True, hue=0.5)
     random_split = np.random.randint(0, 1e6)
 
@@ -251,7 +252,7 @@ for aug in range(round, len(net_list)):
     end_epoch = np.max([args.epoch, start_epoch+1])
     stop_count = 0
     for epoch in range(start_epoch, end_epoch):
-        optimizer = optim.SGD(net.parameters(), lr=get_lr(epoch, args.lr), momentum=0.5, weight_decay=5e-4)
+        optimizer = optim.SGD(net.parameters(), lr=get_lr(epoch, args.lr), momentum=0.9, weight_decay=0.001) # 0.0005, momentum 0.9, lr 0.001
         if reg_list[aug]:
             train(epoch, zip(trainloader, trainloader_shifted), reg=True)
             no_improve = test(epoch, aug, validation_set, validation_set_shifted, test=False)
@@ -291,7 +292,7 @@ for aug in range(round, len(net_list)):
 #     trainloader = torch.utils.data.DataLoader(overall_trainset, batch_size=128, shuffle=True, num_workers=2)
 
 print("Testing on complete test set:")
-
+net = net.to(device)
 print("On ORIGINAL dataset")
 test(100, 100, get_dataset(train=False, hue=0), test=True)
 
