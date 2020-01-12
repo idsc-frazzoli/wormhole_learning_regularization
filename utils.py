@@ -173,12 +173,12 @@ def projection_criterion(train_res, test_res, round):
 
 
 def get_lr(epoch, rate):
-    if epoch < 40:
+    if epoch < 4:
         lr = rate
-    elif 40 <= epoch < 100:
-        lr = rate/5
+    elif 4 <= epoch < 20:
+        lr = rate/10
     else:
-        lr = rate/20
+        lr = rate/50
     return lr
 
 
