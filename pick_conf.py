@@ -25,7 +25,7 @@ def process_prediction(res, i):  # get indexes of confident samples
     return list(sorted_pd[0:i].index)
 
 
-def predict_pick(model, conf, dataloader, cuda=5):
+def predict_pick(model, conf, dataloader, cuda=0):
     net = model
     net.eval()
     confident_samples = []
@@ -74,10 +74,10 @@ def transpose_image(x):
     return z.astype(np.float32)
 
 
-def save_confident_shifted_samples(model, round, dataset, dir_name, ratio=0.05):
+def save_confident_shifted_samples(model, round, dataset, dir_name, ratio=0.05, cuda=0):
     batch_size = 100
     trainloader_shifted = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=2)
-    confident_samples = predict_pick(model=model, conf=int(np.rint(ratio*batch_size)), dataloader=trainloader_shifted)
+    confident_samples = predict_pick(model=model, conf=int(np.rint(ratio*batch_size)), dataloader=trainloader_shifted, cuda=cuda)
 
     root = './confident_samples/%s/confident_sample%s' % (dir_name, round)
     if os.path.exists(root):

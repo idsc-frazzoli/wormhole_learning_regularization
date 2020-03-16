@@ -152,33 +152,92 @@ class PredictionAccPerClass:
 
     def output_class_prediction(self):
         for i in range(10):
+            if self.class_total[i] == 0:
+                acc = 0
+            else:
+                acc = 100 * self.class_correct[i] / self.class_total[i]
             print('Accuracy of %5s : %2d %%, %4d / %5d' % (
-                self.classes[i], 100 * self.class_correct[i] / self.class_total[i],
+                self.classes[i], acc,
                 self.class_correct[i], self.class_total[i]))
 
 
-def projection_criterion(train_res, test_res, round):
-    std_train, mean_train = torch.std_mean(train_res, dim=0)
-    std_test, mean_test = torch.std_mean(test_res, dim=0)
+class ProjectionCriterion():
+    def __init__(self):
+        self.source_mean = 0
+        self.target_mean = 0
+        self.init = True
+        self.alpha = 0.5
 
-    diff_mean = torch.dist(mean_train, mean_test)
-    diff_std = torch.dist(std_train, std_test, p=1)
+    def compute_projection_criterion(self, train_res, test_res, round):
+        mean_train = torch.mean(train_res, dim=0)
+        mean_test = torch.mean(test_res, dim=0)
+        if self.init:
+            self.source_mean = mean_train
+            self.target_mean = mean_test
+            self.init = False
+        else:
+            self.source_mean = self.alpha * mean_train + (1 - self.alpha) * self.source_mean.detach()
+            self.target_mean = self.alpha * mean_test + (1 - self.alpha) * self.target_mean.detach()
 
-    if round % 60 == 0:
-        print("projection criterion loss %8.5f, %8.5f" %
-              (diff_mean.cpu().data.numpy(), diff_std.cpu().data.numpy()))
-    assert (not np.isnan(diff_mean.cpu().data.numpy()))
-    assert (not np.isnan(diff_std.cpu().data.numpy()))
-    return 10*diff_mean + diff_std
+        if round % 100 == 0:
+            print("projection criterion loss %8.5f" % (torch.dist(self.source_mean, self.target_mean).cpu().data.numpy()))
+        return torch.dist(self.source_mean, self.target_mean)
+
+    def compute_projection_criterion_simple(self, train_res, test_res, round):
+        mean_train = torch.mean(train_res, dim=0)
+        mean_test = torch.mean(test_res, dim=0)
+        dist = torch.dist(mean_train, mean_test)
+        if round % 100 == 0:
+            print(
+                "projection criterion loss %8.5f" % (dist.cpu().data.numpy()))
+        return dist
+
+    def compute_projection_criterion_withstd(self, train_res, test_res, round):
+        mean_train = torch.mean(train_res, dim=0)
+        mean_test = torch.mean(test_res, dim=0)
+        if self.init:
+            self.source_mean = mean_train
+            self.target_mean = mean_test
+            self.init = False
+        else:
+            self.source_mean = self.alpha * mean_train + (1 - self.alpha) * self.source_mean.detach()
+            self.target_mean = self.alpha * mean_test + (1 - self.alpha) * self.target_mean.detach()
+
+        std_train = torch.std(train_res, dim=0)
+        std_test = torch.std(test_res, dim=0)
+
+        diff_mean = torch.dist(self.source_mean, self.target_mean)
+        diff_std = torch.dist(std_train, std_test)  # on github I wrote p=1
+
+        if round % 100 == 0:
+            print("projection loss acc %8.5f, std %8.5f" %
+                  (diff_mean.item(), diff_std.item()))
+        assert (not np.isnan(diff_mean.cpu().data.numpy()))
+        assert (not np.isnan(diff_std.cpu().data.numpy()))
+        return diff_mean + 0.1 * diff_std
+
+# def projection_criterion(train_res, test_res, round):
+#     std_train, mean_train = torch.std_mean(train_res, dim=0)
+#     std_test, mean_test = torch.std_mean(test_res, dim=0)
+#
+#     diff_mean = torch.dist(mean_train, mean_test)
+#     diff_std = torch.dist(std_train, std_test, p=1)
+#
+#     if round % 100 == 0:
+#         print("projection criterion loss %8.5f, %8.5f" %
+#               (diff_mean.cpu().data.numpy(), diff_std.cpu().data.numpy()))
+#     assert (not np.isnan(diff_mean.cpu().data.numpy()))
+#     assert (not np.isnan(diff_std.cpu().data.numpy()))
+#     return 10*diff_mean + diff_std
 
 
 def get_lr(epoch, rate):
-    if epoch < 4:
+    if epoch < 10:
         lr = rate
-    elif 4 <= epoch < 20:
-        lr = rate/10
+    elif 10 <= epoch < 40:
+        lr = rate/4
     else:
-        lr = rate/50
+        lr = rate/20
     return lr
 
 
@@ -247,3 +306,18 @@ def random_split_dataset(dataset, lengths, seed=0):
     r.seed(seed)
     indices = r.permutation(sum(lengths)).tolist()
     return [Subset(dataset, indices[offset - length:offset]) for offset, length in zip(_accumulate(lengths), lengths)]
+
+
+def kfold_split(dataset, fold=5, seed=0):
+    total_len = dataset.__len__()
+    lengths = []
+    for _ in range(fold-1):
+        lengths.append(int(total_len / fold))
+    lengths.append(total_len - (fold-1) * int(total_len/fold))
+
+    r = np.random.RandomState(1234)
+    r.seed(seed)
+
+    indices = r.permutation(total_len).tolist()
+    return [Subset(dataset, indices[offset - length:offset]) for offset, length in zip(_accumulate(lengths), lengths)]
+
